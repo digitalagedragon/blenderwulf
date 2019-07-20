@@ -1,0 +1,30 @@
+#!/usr/bin/env perl
+
+BEGIN {
+    push @INC, "../site_perl/";
+}
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+
+use Blenderwulf::Renderer;
+
+my $mode = shift;
+die help() unless $mode;
+
+my $input_file;
+my $help;
+
+GetOptions("file|f=s" => \$input_file,
+	   "help|h" => \$help) or die help();
+
+die help() if $help;
+
+
+sub help {
+    return <<"EOT";
+Usage: $0 <mode> [-f file] -h
+EOT
+}
