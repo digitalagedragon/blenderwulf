@@ -4,12 +4,15 @@ use strict;
 use warnings;
 
 use File::Temp qw(tempfile);
+use Blenderwulf::Config qw(conf_value);
 
+my $blender_command = conf_value('blender_command');
+    
 sub new {
     
 }
 
-sub _get_render_size_from_file {
+sub get_render_size_from_file {
     my $infile = shift;
 
     my $script = <<"EOT";
@@ -21,15 +24,15 @@ EOT
     print $fh $script;
     close $fh;
 
-    my $output = `blender -b $infile -P $fn`;
+    my $output = `$blender_command -b $infile -P $fn`;
     $output =~ /^######## DIMS (\d+) # (\d+)$/m;
     return ($1, $2);
 }
 
-sub _render_from_area {
+sub render_from_area {
     my $infile = shift;
     my $outfile = shift;
-    my ($x, $y, $w, $h) = @_;
+    my ($x, $y, $w, $h, $threads, $output_callback) = @_;
 =comment
     my $script = <<"EOT";
 import bpy
@@ -45,6 +48,7 @@ scene.render.use_border = True
 scene.render.use_crop_to_border = True
 scene.render.resolution_percentage = 100
 scene.render.display_mode = 'NONE'
+scene.render.use_placeholder = False
 EOT
 =cut
 
@@ -59,8 +63,10 @@ orig_res_y = render.resolution_y
 
 width = $w
 height = $h
-left = (width + (2 * $x)) / orig_res_x
-top = (height + (2 * $y)) / orig_res_y
+x = $x
+y = $y
+left = (width + (2 * x)) / orig_res_x
+top = (height + (2 * y)) / orig_res_y
 
 if orig_res_x > orig_res_y:
     if width > height:
@@ -89,11 +95,22 @@ else:
 render.resolution_percentage = 100
 render.tile_x = 32
 render.tile_y = 32
+render.use_placeholder = False
+render.use_file_extension = False
+render.filepath = "$outfile"
+
+bpy.ops.render.render(write_still=True)
+
 EOT
     my ($fh, $fn) = tempfile(UNLINK => 1);
     print $fh $script;
     close $fh;
-    system("blender -b $infile -o $outfile -P $fn -F PNG -E CYCLES -f 1");
+    my $blender_fh;
+    open $blender_fh, "$blender_command -b $infile -t $threads -P $fn|";
+    while(<$blender_fh>) {
+        $output_callback->($_);
+    }
+    close $blender_fh;
 }
 
 
