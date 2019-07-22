@@ -12,6 +12,23 @@ sub new {
     
 }
 
+sub pack_libraries {
+    my $infile = shift;
+    my $outfile = shift;
+
+    my $script = <<"EOT";
+import bpy
+bpy.ops.file.pack_all()
+bpy.ops.wm.save_as_mainfile(filepath="$outfile")
+EOT
+
+    my ($fh, $fn) = tempfile(UNLINK => 1);
+    print $fh $script;
+    close $fh;
+
+    system("$blender_command -b $infile -P $fn");
+}
+
 sub get_render_size_from_file {
     my $infile = shift;
 

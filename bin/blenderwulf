@@ -14,6 +14,7 @@ use Parallel::ForkManager;
 use IO::Socket::INET;
 use JSON;
 use Path::Tiny;
+use List::Util qw(sum);
 
 use Blenderwulf::Renderer;
 
@@ -87,16 +88,26 @@ if($mode eq 'server') {
     my @servers = @ARGV;
 
     print "Have " . scalar(@servers) . " server(s)\n";
-    my ($xres, $yres) = Blenderwulf::Renderer::get_render_size_from_file($input_file);
+    print "Preparing file...";
+    my (undef, $input_tempf) = tempfile(UNLINK => 1);
+    Blenderwulf::Renderer::pack_libraries($input_file, $input_tempf);
+    
+    my ($xres, $yres) = Blenderwulf::Renderer::get_render_size_from_file($input_tempf);
     print "File resolution: $xres x $yres\n";
 
     my @output_files = map { (tempfile(UNLINK => 0))[1] . ".png" } @servers;
     my $nservers = scalar @servers;
-    my $cols_per_server = $xres / $nservers;
+
+    my $num_strips = $xres / 32;
+    $num_strips++ if $xres % 32;
+    $num_strips = int $num_strips;
+    print "Dividing up $num_strips strips.\n";
+    my @cols_per_server = ($xres / $nservers) x $nservers;
+    print "[" . join(', ', @cols_per_server) . "]\n";
     my $current_server_index = -1;
     my $pm = Parallel::ForkManager->new($nservers + 1);
     print "\n" x ($nservers + 1);
-    my $file = path($input_file)->slurp();
+    my $file = path($input_tempf)->slurp();
     foreach my $server (@servers) {
         $current_server_index++;
         $pm->start and next;
@@ -106,16 +117,16 @@ if($mode eq 'server') {
             Proto => 'tcp',
             Timeout => 1
             );
-        my $x0 = $current_server_index * $cols_per_server;
+        my $x0 = sum @cols_per_server[0..$current_server_index-1] // 0;
         my $message = {
             cmd => 'render',
             x => $x0,
             y => 0,
-            w => $cols_per_server,
+            w => $cols_per_server[$current_server_index],
             h => $yres,
             file => $file
         };
-        
+        print_client_message_indexed($current_server_index, $nservers, "<$server> Sending...");
         print $socket to_json($message) . "\n";
 
         my $in_msg;
@@ -123,10 +134,7 @@ if($mode eq 'server') {
             $in_msg = from_json($_);
             last if $in_msg->{type} eq 'done';
             chomp $in_msg->{text};
-            
-            my $offt = $nservers - $current_server_index;
-            my $ostr = "\e[s\e[${offt}A<$server> $in_msg->{text}\e[K\e[u";
-            syswrite(STDOUT, $ostr);
+            print_client_message_indexed($current_server_index, $nservers, "<$server> $in_msg->{text}");
         }
         path($output_files[$current_server_index])->spew($in_msg->{image});
 
@@ -138,4 +146,12 @@ if($mode eq 'server') {
     system($cmd);
 
     map { unlink $_ } @output_files;
+}
+
+sub print_client_message_indexed {
+    my ($idx, $nservers, $text) = @_;
+    my $offt = $nservers - $idx;
+    my $ostr = "\e[s\e[${offt}A$text\e[K\e[u";
+    syswrite(STDOUT, $ostr);
+    
 }
